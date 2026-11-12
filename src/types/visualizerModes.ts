@@ -26,6 +26,7 @@ export const BUILTIN_VISUALIZER_MODES = [
     'monet',
     'partita',
     'pendolo',
+    'skyline',
     'sonnet',
     'still',
     'tempera',

@@ -750,6 +750,126 @@ exports[`mod tuning keys > are pinned, so a renamed or dropped key is a visible 
       "type": "number",
     },
   },
+  "skyline": {
+    "blurStrength": {
+      "max": 12,
+      "min": 0,
+      "type": "number",
+    },
+    "colorMode": {
+      "options": [
+        "skyline",
+        "theme",
+      ],
+      "type": "choice",
+    },
+    "driftShare": {
+      "max": 1,
+      "min": 0,
+      "type": "number",
+    },
+    "duration": {
+      "max": 1.5,
+      "min": 0.2,
+      "type": "number",
+    },
+    "easing": {
+      "options": [
+        "smooth",
+        "out",
+        "swift",
+        "spring",
+        "linear",
+      ],
+      "type": "choice",
+    },
+    "emphasize": {
+      "type": "boolean",
+    },
+    "fadeWidth": {
+      "max": 2,
+      "min": 0.05,
+      "type": "number",
+    },
+    "farDim": {
+      "max": 1,
+      "min": 0,
+      "type": "number",
+    },
+    "float": {
+      "max": 0.2,
+      "min": 0,
+      "type": "number",
+    },
+    "glow": {
+      "max": 0.4,
+      "min": 0,
+      "type": "number",
+    },
+    "grow": {
+      "max": 1.6,
+      "min": 1,
+      "type": "number",
+    },
+    "interludeMin": {
+      "max": 10,
+      "min": 0,
+      "type": "number",
+    },
+    "lead": {
+      "max": 0.8,
+      "min": 0,
+      "type": "number",
+    },
+    "lyricScale": {
+      "max": 1.6,
+      "min": 0.6,
+      "type": "number",
+    },
+    "maxWidthRatio": {
+      "max": 0.7,
+      "min": 0.25,
+      "type": "number",
+    },
+    "motionBlur": {
+      "max": 1,
+      "min": 0,
+      "type": "number",
+    },
+    "perSideMax": {
+      "max": 4,
+      "min": 0,
+      "step": 1,
+      "type": "number",
+    },
+    "perSideMin": {
+      "max": 4,
+      "min": 0,
+      "step": 1,
+      "type": "number",
+    },
+    "reactStrength": {
+      "max": 2,
+      "min": 0,
+      "type": "number",
+    },
+    "sparkRate": {
+      "max": 300,
+      "min": 0,
+      "step": 1,
+      "type": "number",
+    },
+    "spread": {
+      "max": 0.4,
+      "min": 0,
+      "type": "number",
+    },
+    "wordSize": {
+      "max": 2,
+      "min": 0.3,
+      "type": "number",
+    },
+  },
   "sonnet": {
     "cameraIntensity": {
       "max": 2,

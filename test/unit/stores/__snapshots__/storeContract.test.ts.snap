@@ -162,6 +162,7 @@ exports[`store contract > keeps every localStorage key the stores read or write 
   "show_home_tab_playlist",
   "show_home_tab_radio",
   "show_subtitle_translation",
+  "skyline_tuning",
   "sleep_timer_hours",
   "sleep_timer_minutes",
   "sonnet_tuning",

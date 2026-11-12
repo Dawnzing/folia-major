@@ -43,6 +43,7 @@ const STYLES = [
     ['pendolo', 'Pendolo', 'DOM + 2D 画布'],
     ['cappella', 'Cappella', 'DOM'],
     ['diorama', '镜台', 'three.js'],
+    ['skyline', '天际', 'DOM + 2D 画布'],
     ['still', 'Still', 'DOM，不画背景'],
 ];
 

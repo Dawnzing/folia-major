@@ -1,0 +1,148 @@
+/* src/components/visualizer/skyline/skyline.css
+   天际样式的样式表：所有规则都限定在 .sk-root 下，变量由 skylineEngine.ts 写在 .sk-root 上。 */
+
+.sk-root {
+    --sk-sung: #ff7a6b; /* 已唱：珊瑚红 */
+    --sk-unsung: #f7f3ee; /* 未唱：暖白 */
+    --sk-pulse: 0; /* 律动强度 0～1 */
+    --sk-lyric-px: 60px; /* 主歌词字号 */
+    --sk-switch-dur: 0.75s; /* 换句时长，与两侧词云共用 */
+    --sk-switch-ease: cubic-bezier(0.3, 0, 0, 1); /* 换句曲线，与两侧词云共用 */
+    --sk-fade-width: 0.5; /* 填色过渡带宽度（字高） */
+    --sk-glow: 0.1; /* 背景光晕强度 */
+    --sk-font: serif;
+    --sk-weight: 700; /* 由 resolveThemeFontWeight 决定，主歌词与两侧词云共用 */
+    --sk-weight-light: 500;
+    background-color: #050505;
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+        radial-gradient(
+            55% 45% at 50% 50%,
+            color-mix(in srgb, var(--sk-sung) calc(var(--sk-glow) * 100%), transparent),
+            transparent 72%
+        ),
+        radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.65));
+}
+
+.sk-root .sk-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.sk-root canvas.sk-layer {
+    display: block;
+}
+
+/* ---------- 歌词行 ---------- */
+
+.sk-root .sk-line {
+    --y: 0em;
+    --s: 1;
+    --fit: 1;
+    --feather: calc(var(--sk-fade-width) * 1em);
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    white-space: nowrap;
+    font-family: var(--sk-font);
+    font-weight: var(--sk-weight);
+    font-stretch: 62.5%;
+    font-variation-settings: 'wdth' 62.5;
+    font-size: var(--sk-lyric-px);
+    line-height: 1.2;
+    letter-spacing: 0.055em;
+    color: var(--sk-unsung);
+    transform-origin: 50% 50%;
+    transform: translate(-50%, -50%) translateY(var(--y)) scale(calc(var(--s) * var(--fit)));
+    transition:
+        transform var(--sk-switch-dur) var(--sk-switch-ease),
+        opacity calc(var(--sk-switch-dur) * 0.8) ease,
+        filter calc(var(--sk-switch-dur) * 0.8) ease;
+}
+
+.sk-root .sk-line[data-state='current'] {
+    opacity: 1;
+}
+.sk-root .sk-line[data-state='next'] {
+    --y: 1.05em;
+    --s: 0.38;
+    opacity: 0.8;
+    font-weight: var(--sk-weight-light);
+}
+.sk-root .sk-line[data-state='enter'] {
+    --y: 1.6em;
+    --s: 0.34;
+    opacity: 0;
+}
+.sk-root .sk-line[data-state='past'] {
+    --y: -0.85em;
+    --s: 0.92;
+    opacity: 0;
+    filter: blur(0.08em);
+}
+.sk-root .sk-line.sk-title[data-state='current'] {
+    color: var(--sk-sung);
+}
+.sk-root .sk-no-anim .sk-line {
+    transition: none !important;
+}
+
+/* 句内渐渐放大：只作用于内层，由 Web Animations 驱动，不参与外层的换句过渡 */
+.sk-root .sk-grow {
+    display: inline-block;
+    transform-origin: 50% 50%;
+}
+
+/* 逐字填色：整行一条连续的填色边缘（--edge 由 JS 写入，相对单元左侧），
+   过渡带宽度固定为 --sk-fade-width 个字高。当前句和离场句都保持填色 */
+.sk-root .sk-w,
+.sk-root .sk-c {
+    display: inline-block;
+    white-space: pre;
+}
+.sk-root .sk-line:is([data-state='current'], [data-state='past']) .sk-u {
+    color: transparent;
+    background-image: linear-gradient(
+        90deg,
+        var(--sk-sung) calc(var(--edge, -1em) - var(--feather) / 2),
+        var(--sk-unsung) calc(var(--edge, -1em) + var(--feather) / 2)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+.sk-root .sk-line[data-state='current'] .sk-w.sk-active {
+    text-shadow: 0 0 calc(0.3em + var(--sk-pulse) * 0.25em)
+        color-mix(in srgb, var(--sk-sung) calc(30% + var(--sk-pulse) * 40%), transparent);
+}
+/* 长音强调的字：放大、推开、上浮回落、发光（由 JS 每帧写入） */
+.sk-root .sk-c {
+    transform-origin: 50% 70%;
+}
+
+/* ---------- 间奏圆点 ---------- */
+
+.sk-root .sk-interlude {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    display: flex;
+    gap: calc(var(--sk-lyric-px) * 0.32);
+    opacity: 0;
+    transform: translate(-50%, -50%);
+}
+.sk-root .sk-interlude i {
+    width: calc(var(--sk-lyric-px) * 0.2);
+    height: calc(var(--sk-lyric-px) * 0.2);
+    border-radius: 50%;
+    background: var(--sk-unsung);
+    box-shadow: 0 0 calc(var(--sk-lyric-px) * 0.25) color-mix(in srgb, var(--sk-sung) 45%, transparent);
+    opacity: 0.2;
+}
+/* 间奏时当前句淡出，让位给圆点 */
+.sk-root .sk-center[data-sk-interlude] .sk-line[data-state='current'] {
+    opacity: 0;
+}

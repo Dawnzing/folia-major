@@ -21,6 +21,7 @@ import {
 import { DEFAULT_HANABI_TUNING } from '@/components/visualizer/hanabi/types';
 import { DEFAULT_MACHI_TUNING } from '@/components/visualizer/machi/types';
 import { DEFAULT_NEBBIA_TUNING } from '@/components/visualizer/nebbia/types';
+import { DEFAULT_SKYLINE_TUNING } from '@/components/visualizer/skyline/types';
 
 // test/unit/visualizer/storedSettingsPins.test.ts
 // Pins what the lyric styles and the backgrounds keep in localStorage: for every one of them, what
@@ -118,6 +119,7 @@ const CURRENT: Record<string, unknown> = {
     },
     cappella_tuning: { showEmoMessages: false, emojiPackSource: 'custom', avatarSource: 'color' },
     tilt_tuning: { splitProbability: 0.4, tiltStyleProbability: 0.6, colorScheme: 'swap' },
+    skyline_tuning: { ...DEFAULT_SKYLINE_TUNING, grow: 1.2, easing: 'spring', emphasize: false, perSideMax: 4, colorMode: 'theme' },
     diorama_tuning: {
         ...DEFAULT_DIORAMA_TUNING,
         cameraSpeed: 1.3, motionAmount: 0.9, audioReactivity: 0.5,
@@ -193,6 +195,7 @@ const DEFAULTS: Record<string, unknown> = {
     lumiere_tuning: DEFAULT_LUMIERE_TUNING, hanabi_tuning: DEFAULT_HANABI_TUNING, machi_tuning: DEFAULT_MACHI_TUNING, nebbia_tuning: DEFAULT_NEBBIA_TUNING,
     monet_background_tuning: DEFAULT_MONET_BACKGROUND_TUNING, nomand_background_tuning: DEFAULT_NOMAND_BACKGROUND_TUNING, latent_background_tuning: DEFAULT_LATENT_BACKGROUND_TUNING,
     sora_background_tuning: DEFAULT_SORA_BACKGROUND_TUNING,
+    skyline_tuning: DEFAULT_SKYLINE_TUNING,
 };
 
 describe('what is read at start-up', () => {
