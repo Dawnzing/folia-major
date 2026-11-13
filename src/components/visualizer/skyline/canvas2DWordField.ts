@@ -57,7 +57,8 @@ export class Canvas2DWordField {
         this.lastWarmScan = -Infinity;
     }
 
-    private refreshFonts(): void {
+    /** 字体加载完成后：清空贴图缓存（之前画的可能是回退字体）并重新摆放 */
+    refreshFonts(): void {
         this.cache.clear();
         this.tunnel.invalidate();
         this.lastWarmScan = -Infinity;

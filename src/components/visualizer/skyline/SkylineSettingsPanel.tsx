@@ -2,7 +2,7 @@ import React from 'react';
 import { Group, Row, Segmented, type SettingsGroupDef } from '../../modal/settings/kit';
 import type { VisualizerSettingsPanelProps } from '../definition';
 import { SliderRow, ToggleRow } from '../panelRows';
-import { SKYLINE_RANGES, type SkylineColorMode, type SkylineTuning } from './types';
+import { SKYLINE_RANGES, type SkylineColorMode, type SkylineFontMode, type SkylineTuning } from './types';
 import type { EasingName } from './easing';
 
 // src/components/visualizer/skyline/SkylineSettingsPanel.tsx
@@ -54,6 +54,16 @@ const SkylineSettingsPanel: React.FC<VisualizerSettingsPanelProps<SkylineTuning>
     return (
         <>
             <Group def={LYRIC_GROUP}>
+                <Row label={t('options.skylineFontMode')}>
+                    <Segmented<SkylineFontMode>
+                        value={tuning.fontMode}
+                        options={[
+                            { value: 'skyline', label: t('options.skylineFontModeSkyline') },
+                            { value: 'theme', label: t('options.skylineFontModeTheme') },
+                        ]}
+                        onChange={fontMode => onTuningChange({ fontMode })}
+                    />
+                </Row>
                 {LYRIC_SLIDERS.map(slider)}
                 <ToggleRow
                     label={t('options.skylineEmphasize')}

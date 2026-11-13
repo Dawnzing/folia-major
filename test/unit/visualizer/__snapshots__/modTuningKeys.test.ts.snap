@@ -801,6 +801,13 @@ exports[`mod tuning keys > are pinned, so a renamed or dropped key is a visible 
       "min": 0,
       "type": "number",
     },
+    "fontMode": {
+      "options": [
+        "skyline",
+        "theme",
+      ],
+      "type": "choice",
+    },
     "glow": {
       "max": 0.4,
       "min": 0,

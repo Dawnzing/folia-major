@@ -1,5 +1,5 @@
 import { defineVisualizerTuning, modChoice, modNumber, MOD_SWITCH, numberWithin, type VisualizerModTuningKey } from '../tuningDefinition';
-import { DEFAULT_SKYLINE_TUNING, SKYLINE_COLOR_MODES, SKYLINE_EASINGS, SKYLINE_RANGES, type SkylineTuning } from './types';
+import { DEFAULT_SKYLINE_TUNING, SKYLINE_COLOR_MODES, SKYLINE_EASINGS, SKYLINE_FONT_MODES, SKYLINE_RANGES, type SkylineTuning } from './types';
 
 // src/components/visualizer/skyline/tuning.ts
 // 天际的 tuning：默认值、存在设置仓库的哪几个字段、存储键，以及读取和合并时的夹取。
@@ -28,6 +28,8 @@ const resolve = (values: Partial<SkylineTuning>, base: SkylineTuning): SkylineTu
     if (easing) out.easing = easing;
     const colorMode = SKYLINE_COLOR_MODES.find(m => m === values.colorMode);
     if (colorMode) out.colorMode = colorMode;
+    const fontMode = SKYLINE_FONT_MODES.find(m => m === values.fontMode);
+    if (fontMode) out.fontMode = fontMode;
     return out;
 };
 
@@ -35,6 +37,7 @@ const modKeys: { [K in keyof SkylineTuning]?: VisualizerModTuningKey } = {
     emphasize: MOD_SWITCH,
     easing: modChoice(SKYLINE_EASINGS),
     colorMode: modChoice(SKYLINE_COLOR_MODES),
+    fontMode: modChoice(SKYLINE_FONT_MODES),
 };
 for (const key of NUMBER_KEYS) {
     const { min, max, integer } = SKYLINE_RANGES[key];

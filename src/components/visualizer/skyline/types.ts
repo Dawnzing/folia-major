@@ -4,9 +4,12 @@ import type { EasingName } from './easing';
 // 天际样式的可调参数和默认值（默认值来自对原视频的逐帧实测，见 skyline/README.md）。
 
 export type SkylineColorMode = 'skyline' | 'theme';
+export type SkylineFontMode = 'skyline' | 'theme';
 
 export interface SkylineTuning {
     // ---- 主歌词 ----
+    /** skyline：天际衬线（窄体衬线 + 宋体 / 明朝体，与原视频一致）；theme：跟随 Folia 的主题字体 */
+    fontMode: SkylineFontMode;
     /** 字号倍率 */
     lyricScale: number;
     /** 宽屏时当前句最大宽度（占舞台宽度的比例） */
@@ -51,6 +54,7 @@ export interface SkylineTuning {
 }
 
 export const DEFAULT_SKYLINE_TUNING: SkylineTuning = {
+    fontMode: 'skyline',
     lyricScale: 1,
     maxWidthRatio: 0.46,
     lead: 0.25,
@@ -102,3 +106,9 @@ export const SKYLINE_RANGES: Record<NumberKey, { min: number; max: number; step:
 
 export const SKYLINE_EASINGS = ['smooth', 'out', 'swift', 'spring', 'linear'] as const satisfies readonly EasingName[];
 export const SKYLINE_COLOR_MODES = ['skyline', 'theme'] as const satisfies readonly SkylineColorMode[];
+export const SKYLINE_FONT_MODES = ['skyline', 'theme'] as const satisfies readonly SkylineFontMode[];
+
+/** 天际衬线：拉丁字母用窄体 Noto Serif Display（skyline.css 加载），中文用宋体 */
+export const SKYLINE_FONT_STACK = '"Skyline Serif Display", "Folia Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif';
+/** 含假名的句子：日文明朝体优先，汉字也用日文字形 */
+export const SKYLINE_FONT_STACK_JA = '"Skyline Serif Display", "Noto Serif JP", "Noto Serif CJK JP", "Source Han Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "Folia Noto Serif SC", "Songti SC", serif';

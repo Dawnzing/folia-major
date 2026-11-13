@@ -83,8 +83,7 @@ export class SkylineEngine {
      * @param font 字体栈（resolveThemeFontStack）
      * @param weight 字重（resolveThemeFontWeight），主歌词与两侧词云共用
      */
-    constructor(container: HTMLElement, tuning: SkylineTuning, font: string, weight: number) {
-        const fontJa = font;
+    constructor(container: HTMLElement, tuning: SkylineTuning, font: string, weight: number, fontJa: string = font) {
         this.tuning = tuning;
         this.root = document.createElement('div');
         this.root.className = 'sk-root';
@@ -94,13 +93,14 @@ export class SkylineEngine {
         this.centerHost.className = 'sk-layer sk-center';
         this.root.append(this.fieldCanvas, this.centerHost);
         container.append(this.root);
-        this.setFontVars(font, weight);
+        this.setFontVars(font, fontJa, weight);
 
         this.center = new CenterLyrics(this.centerHost);
         this.field = new Canvas2DWordField(this.fieldCanvas, SKYLINE_SUNG, font, fontJa, weight);
         this.sparks = new Sparks();
         this.field.overlays.push((ctx, dpr) => this.sparks.render(ctx, dpr)); // 粒子画在词云同一块画布上
 
+        this.loadFonts(weight);
         this.applyTuning(true);
         this.ro = new ResizeObserver(() => this.relayout());
         this.ro.observe(this.root);
@@ -123,9 +123,10 @@ export class SkylineEngine {
         this.applyColors(immediate);
     }
 
-    setFont(font: string, weight: number): void {
-        this.setFontVars(font, weight);
-        this.field.setFont(font, font, weight);
+    setFont(font: string, weight: number, fontJa: string = font): void {
+        this.setFontVars(font, fontJa, weight);
+        this.field.setFont(font, fontJa, weight);
+        this.loadFonts(weight);
         requestAnimationFrame(() => this.center.refit());
     }
 
@@ -185,8 +186,18 @@ export class SkylineEngine {
         }
     }
 
-    private setFontVars(font: string, weight: number): void {
+    /** Canvas 画字不会触发网页字体下载：主动加载天际衬线，到了再刷新词云贴图、重新测量主歌词 */
+    private loadFonts(weight: number): void {
+        void document.fonts.load(`${weight} 64px "Skyline Serif Display"`, 'Skyline').then((faces) => {
+            if (!faces.length || !this.root.isConnected) return;
+            this.field.refreshFonts();
+            this.center.refit();
+        }, () => undefined);
+    }
+
+    private setFontVars(font: string, fontJa: string, weight: number): void {
         this.root.style.setProperty('--sk-font', font);
+        this.root.style.setProperty('--sk-font-ja', fontJa);
         this.root.style.setProperty('--sk-weight', String(weight));
         // 下一句预览比当前句轻一档
         this.root.style.setProperty('--sk-weight-light', String(Math.max(100, weight - 200)));

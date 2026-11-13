@@ -5,6 +5,7 @@ import VisualizerShell from '../VisualizerShell';
 import { SkylineEngine } from './skylineEngine';
 import { fromFoliaLines } from './skylineLyrics';
 import skylineTuning from './tuning';
+import { SKYLINE_FONT_STACK, SKYLINE_FONT_STACK_JA } from './types';
 
 // src/components/visualizer/skyline/VisualizerSkyline.tsx
 // 天际的 React 外壳：把不依赖 React 的 SkylineEngine 挂进共享外壳，用自己的 RAF 循环读 currentTime 驱动它。
@@ -29,7 +30,10 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
     const engineRef = useRef<SkylineEngine | null>(null);
 
     const tuning = skylineTuning.read(visualizerTunings);
-    const fontStack = resolveThemeFontStack(theme);
+    // 天际衬线是样式自己的字体（与原视频一致）；也可以改为跟随主题字体。字重始终走主题
+    const themeStack = resolveThemeFontStack(theme);
+    const fontStack = tuning.fontMode === 'theme' ? themeStack : SKYLINE_FONT_STACK;
+    const fontStackJa = tuning.fontMode === 'theme' ? themeStack : SKYLINE_FONT_STACK_JA;
     const fontWeight = resolveThemeFontWeight(theme, 700);
     // 用户的歌词字号倍率乘在样式自己的字号倍率上
     const effectiveTuning = useMemo(() => ({ ...tuning, lyricScale: tuning.lyricScale * lyricsFontScale }), [tuning, lyricsFontScale]);
@@ -38,10 +42,10 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
     // 逐帧循环读的输入放在 ref 里：MotionValue 换了对象（换歌交接）也不用重建引擎
     const live = useRef({ currentTime, audioPower, audioBands, paused });
     // 挂载时要用的离散输入的最新值
-    const initial = useRef({ effectiveTuning, fontStack, fontWeight, skyLines, songTitle, songArtist, theme });
+    const initial = useRef({ effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme });
     useLayoutEffect(() => {
         live.current = { currentTime, audioPower, audioBands, paused };
-        initial.current = { effectiveTuning, fontStack, fontWeight, skyLines, songTitle, songArtist, theme };
+        initial.current = { effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme };
     });
 
     // 挂载引擎与逐帧循环：只挂一次，之后的变化由下面几个 effect 送进去
@@ -49,7 +53,7 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
         const host = hostRef.current;
         if (!host) return;
         const init = initial.current;
-        const engine = new SkylineEngine(host, init.effectiveTuning, init.fontStack, init.fontWeight);
+        const engine = new SkylineEngine(host, init.effectiveTuning, init.fontStack, init.fontWeight, init.fontStackJa);
         engine.setThemeColors(init.theme.accentColor, init.theme.primaryColor, true);
         engine.setLines(init.skyLines, init.songTitle, init.songArtist);
         engineRef.current = engine;
@@ -83,8 +87,8 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
     }, [theme.accentColor, theme.primaryColor]);
 
     useEffect(() => {
-        engineRef.current?.setFont(fontStack, fontWeight);
-    }, [fontStack, fontWeight]);
+        engineRef.current?.setFont(fontStack, fontWeight, fontStackJa);
+    }, [fontStack, fontStackJa, fontWeight]);
 
     useEffect(() => {
         engineRef.current?.setTuning(effectiveTuning);
