@@ -87,6 +87,8 @@ export interface StageLayout {
     centerY: number;
     /** 主歌词最大半宽（px） */
     mainHalfW: number;
+    /** 左右两侧留出的安全边宽度（px）：预览把 16:9 裁进 16:10，贴边的远处词会被裁掉一半 */
+    edgeMargin: number;
     portrait: boolean;
 }
 
@@ -177,7 +179,14 @@ export class WordTunnel {
     setLayout(layout: StageLayout): void {
         const prev = this.layout;
         this.layout = layout;
-        if (!prev || prev.w !== layout.w || prev.h !== layout.h || prev.em !== layout.em || prev.mainHalfW !== layout.mainHalfW) {
+        if (
+            !prev
+            || prev.w !== layout.w
+            || prev.h !== layout.h
+            || prev.em !== layout.em
+            || prev.mainHalfW !== layout.mainHalfW
+            || prev.edgeMargin !== layout.edgeMargin
+        ) {
             this.dirty = true;
         }
     }
@@ -282,9 +291,11 @@ export class WordTunnel {
         const bright = 0.5 + rnd() * 0.45;
         if (side === 'left' || side === 'right') {
             const vpOffset = L.mainHalfW + p.gap * L.em;
-            const zone = Math.max(L.em, L.w / 2 - vpOffset - L.em * 0.5);
+            const zone = Math.max(L.em, L.w / 2 - vpOffset - L.em * 0.5 - L.edgeMargin);
             // 偏向靠近主歌词的一侧，与原视频一致
-            const ax = Math.pow(rnd(), 1.5) * Math.max(1, zone * p.zoneFill - width * 0.6);
+            let reach = Math.max(1, zone * p.zoneFill - width * 0.6);
+            if (L.edgeMargin > 0) reach = Math.max(0, Math.min(reach, L.w / 2 - L.edgeMargin - vpOffset - width));
+            const ax = Math.pow(rnd(), 1.5) * reach;
             const ay = (rnd() * 2 - 1) * p.spread * L.h;
             return { text, side, ax, ay, size, bright, ratio };
         }

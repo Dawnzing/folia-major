@@ -1,3 +1,5 @@
+import { resolveLyricPixelRatio } from '../../../utils/lyricRenderQuality';
+import type { LyricRenderScale } from '../../../types';
 import type { SkyDoc as LyricDoc } from './skylineLyrics';
 import { BLUR_LEVELS, get2dContext, SpriteCache, type Sprite } from './spriteCache';
 import { WordTunnel, type StageLayout } from './wordTunnel';
@@ -22,10 +24,17 @@ export class Canvas2DWordField {
     private readonly ctx: CanvasRenderingContext2D;
     private cache: SpriteCache;
     private dpr = 1;
+    /** 全局歌词分辨率挡位（「动画与性能」），叠在样式自己的默认像素密度上 */
+    private renderScale: LyricRenderScale = 1;
+    private layout: StageLayout | null = null;
     private prevBox: Box | null = null;
     private warmQueue: string[] = [];
     private warmCursor = 0;
     private lastWarmScan = -Infinity;
+    /** 上一次性真正画过的时间；暂停且时间、颜色、布局都没变时用它跳过整帧重绘 */
+    private lastPainted = Number.NaN;
+    /** 需要重画的理由：歌词、布局、字体、颜色、tuning 变了 */
+    private dirty = true;
     /** 叠加图层：画在着色之后，不受词云主题色影响 */
     readonly overlays: Overlay[] = [];
 
@@ -53,24 +62,47 @@ export class Canvas2DWordField {
     setFont(font: string, fontJa: string = font, weight = 700): void {
         this.cache.clear();
         this.cache = new SpriteCache(font, fontJa, weight);
-        this.tunnel.invalidate();
         this.lastWarmScan = -Infinity;
+        this.invalidate();
+    }
+
+    /** 全局分辨率挡位变了：重设画布像素尺寸并重画 */
+    setRenderScale(scale: LyricRenderScale): void {
+        if (scale === this.renderScale) return;
+        this.renderScale = scale;
+        if (this.layout) this.resize(this.layout);
+        this.dirty = true;
     }
 
     /** 字体加载完成后：清空贴图缓存（之前画的可能是回退字体）并重新摆放 */
     refreshFonts(): void {
         this.cache.clear();
-        this.tunnel.invalidate();
         this.lastWarmScan = -Infinity;
+        this.invalidate();
+    }
+
+    /** 重摆两侧词并重画（参数、字体宽度、布局失效时调用） */
+    invalidate(): void {
+        this.tunnel.invalidate();
+        this.dirty = true;
     }
 
     setDoc(doc: LyricDoc): void {
         this.tunnel.setLines(doc.lines);
         this.lastWarmScan = -Infinity;
+        this.dirty = true;
     }
 
     setLayout(layout: StageLayout): void {
-        this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+        this.layout = layout;
+        this.resize(layout);
+        this.tunnel.setLayout(layout);
+        this.dirty = true;
+    }
+
+    /** 按布局和分辨率挡位重设画布像素尺寸（尺寸没变就不动） */
+    private resize(layout: StageLayout): void {
+        this.dpr = resolveLyricPixelRatio(Math.min(window.devicePixelRatio || 1, 2), this.renderScale);
         const w = Math.round(layout.w * this.dpr);
         const h = Math.round(layout.h * this.dpr);
         if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -78,17 +110,26 @@ export class Canvas2DWordField {
             this.canvas.height = h;
             this.prevBox = null;
         }
-        this.tunnel.setLayout(layout);
     }
 
     /** 只改着色，不重画贴图，可以每帧调用（主题色渐变） */
     setColor(color: string): void {
+        if (color === this.color) return;
         this.color = color;
+        this.dirty = true;
     }
 
-    update(t: number): void {
-        this.tunnel.update(t);
-        this.draw();
+    /**
+     * 推进一帧：播放中或歌词时间变了、或有失效（布局、字体、颜色）才重画；
+     * 暂停在同一句里且上一次已经画完时只继续预热贴图，不再整帧清屏、贴图、着色。
+     */
+    update(t: number, playing: boolean): void {
+        if (this.dirty || playing || t !== this.lastPainted) {
+            this.tunnel.update(t);
+            this.draw();
+            this.lastPainted = t;
+            this.dirty = false;
+        }
         this.warm(t);
     }
 

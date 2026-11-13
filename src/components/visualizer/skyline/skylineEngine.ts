@@ -4,6 +4,7 @@ import { EASINGS } from './easing';
 import { Sparks } from './sparks';
 import type { SkyLine } from './skylineLyrics';
 import type { SkylineTuning } from './types';
+import type { LyricRenderScale } from '../../../types';
 import './skyline.css';
 
 // src/components/visualizer/skyline/skylineEngine.ts
@@ -16,8 +17,20 @@ export interface SkylineAudio {
     bass: number;
 }
 
+export interface SkylineEngineOptions {
+    /** 预览小图：主歌词更宽、两侧词云留安全边（正式播放画面不变） */
+    preview?: boolean;
+    /** 词云画布的分辨率倍数（全局歌词分辨率，导出时可能是钉住的值） */
+    renderScale?: LyricRenderScale;
+}
+
 const SKYLINE_SUNG = '#ff7a6b';
 const SKYLINE_UNSUNG = '#f7f3ee';
+// 预览的样式选择器把 16:9 舞台裁进 16:10，左右各少约 5%：两侧词云给左右各留 8% 安全边
+// （主歌词宽度不放宽：放宽会把两侧词云挤到边上，小图里长句本来也看不清，构图更重要）
+const PREVIEW_EDGE_MARGIN = 0.08;
+/** 歌词时间跳变超过这么久视为换歌 / 跳转 */
+const LYRIC_JUMP_SEC = 1;
 
 const hexToRgb = (hex: string): [number, number, number] => {
     const h = hex.replace('#', '').trim();
@@ -68,12 +81,18 @@ export class SkylineEngine {
     private readonly field: Canvas2DWordField;
     private readonly sparks: Sparks;
     private readonly ro: ResizeObserver;
+    private readonly preview: boolean;
     private tuning: SkylineTuning;
     private readonly sung = new ColorTween(SKYLINE_SUNG);
     private readonly unsung = new ColorTween(SKYLINE_UNSUNG);
     private themeSung = SKYLINE_SUNG;
     private themeUnsung = SKYLINE_UNSUNG;
     private lastPulse = -1;
+    /** 上一帧的歌词时间：用来识别换歌 / 跳转（粒子要清尾迹） */
+    private lastT = Number.NaN;
+    private disposed = false;
+    /** 挂起的下一帧回调（字体加载、布局后重新测量），卸载时一并取消 */
+    private readonly rafs = new Set<number>();
     // 简单的起音检测：低频突然升高视为一拍
     private bassAvg = 0;
     private beat = 0;
@@ -83,8 +102,16 @@ export class SkylineEngine {
      * @param font 字体栈（resolveThemeFontStack）
      * @param weight 字重（resolveThemeFontWeight），主歌词与两侧词云共用
      */
-    constructor(container: HTMLElement, tuning: SkylineTuning, font: string, weight: number, fontJa: string = font) {
+    constructor(
+        container: HTMLElement,
+        tuning: SkylineTuning,
+        font: string,
+        weight: number,
+        fontJa: string = font,
+        options: SkylineEngineOptions = {},
+    ) {
         this.tuning = tuning;
+        this.preview = options.preview ?? false;
         this.root = document.createElement('div');
         this.root.className = 'sk-root';
         this.fieldCanvas = document.createElement('canvas');
@@ -97,6 +124,7 @@ export class SkylineEngine {
 
         this.center = new CenterLyrics(this.centerHost);
         this.field = new Canvas2DWordField(this.fieldCanvas, SKYLINE_SUNG, font, fontJa, weight);
+        this.field.setRenderScale(options.renderScale ?? 1);
         this.sparks = new Sparks();
         this.field.overlays.push((ctx, dpr) => this.sparks.render(ctx, dpr)); // 粒子画在词云同一块画布上
 
@@ -114,6 +142,8 @@ export class SkylineEngine {
         const doc = { lines, meta };
         this.center.setDoc(doc);
         this.field.setDoc(doc);
+        // 换歌：上一首的尾迹和起音状态不能带过来（离场句不受影响）
+        this.resetSparks();
     }
 
     /** 宿主的主题色（tuning.colorMode 为 theme 时使用） */
@@ -127,7 +157,17 @@ export class SkylineEngine {
         this.setFontVars(font, fontJa, weight);
         this.field.setFont(font, fontJa, weight);
         this.loadFonts(weight);
-        requestAnimationFrame(() => this.center.refit());
+        this.afterFrame(() => this.center.refit());
+    }
+
+    /** 全局歌词分辨率挡位变了（画布像素密度） */
+    setRenderScale(scale: LyricRenderScale): void {
+        this.field.setRenderScale(scale);
+    }
+
+    /** 让下一帧无条件重画（隐藏后恢复、需要补画时） */
+    invalidate(): void {
+        this.field.invalidate();
     }
 
     setTuning(tuning: SkylineTuning): void {
@@ -145,6 +185,10 @@ export class SkylineEngine {
         const realDt = Math.min(0.1, Math.max(0, dt));
         const playDt = playing ? realDt : 0;
 
+        // 换歌 / 拖动进度条：歌词时间倒退或一次跳太远时清尾迹，别把旧位置上的粒子留在画面上
+        if (Number.isFinite(this.lastT) && (t < this.lastT - 1e-3 || t - this.lastT > LYRIC_JUMP_SEC)) this.resetSparks();
+        this.lastT = t;
+
         // 先读布局（演唱位置），再做所有样式写入，避免强制同步重排
         const head = this.center.head();
 
@@ -152,9 +196,11 @@ export class SkylineEngine {
         const strength = this.tuning.reactStrength;
         this.detectBeat(audio.bass, playDt);
         Object.assign(this.sparks.pulse, { energy: audio.energy, beat: this.beat, onset: this.sinceBeat === 0, strength });
-        const pulse = Math.round(Math.min(1, (this.beat * 0.7 + audio.bass * 0.3) * strength) * 100) / 100;
+        // 只给正在唱的词的光晕用：量化到 0.1 一档并只写在主歌词层上。--sk-pulse 会被继承，
+        // 每帧都写（低频归一化后几乎每帧在变）会让整个歌词子树逐帧重算样式，实测掉约 10fps
+        const pulse = Math.round(Math.min(1, (this.beat * 0.7 + audio.bass * 0.3) * strength) * 10) / 10;
         if (pulse !== this.lastPulse) {
-            this.root.style.setProperty('--sk-pulse', String(pulse));
+            this.centerHost.style.setProperty('--sk-pulse', String(pulse));
             this.lastPulse = pulse;
         }
 
@@ -164,16 +210,38 @@ export class SkylineEngine {
 
         this.center.update(t, playing);
         this.sparks.update(playDt, head);
-        this.field.update(t);
+        this.field.update(t, playing);
     }
 
     dispose(): void {
+        this.disposed = true;
+        for (const id of this.rafs) cancelAnimationFrame(id);
+        this.rafs.clear();
         this.ro.disconnect();
+        this.center.dispose();
         this.field.dispose();
         this.root.remove();
     }
 
     // ---------- 内部 ----------
+
+    /** 下一帧执行一件事；卸载时取消（字体加载、布局测量都是异步的） */
+    private afterFrame(fn: () => void): void {
+        const id = requestAnimationFrame(() => {
+            this.rafs.delete(id);
+            if (!this.disposed) fn();
+        });
+        this.rafs.add(id);
+    }
+
+    /** 清粒子尾迹，并重置低频起音检测状态 */
+    private resetSparks(): void {
+        this.sparks.reset();
+        this.bassAvg = 0;
+        this.beat = 0;
+        this.sinceBeat = 1;
+        this.lastPulse = -1;
+    }
 
     private detectBeat(bass: number, dt: number): void {
         this.beat *= Math.exp(-dt * 5);
@@ -189,7 +257,7 @@ export class SkylineEngine {
     /** Canvas 画字不会触发网页字体下载：主动加载天际衬线，到了再刷新词云贴图、重新测量主歌词 */
     private loadFonts(weight: number): void {
         void document.fonts.load(`${weight} 64px "Skyline Serif Display"`, 'Skyline').then((faces) => {
-            if (!faces.length || !this.root.isConnected) return;
+            if (this.disposed || !faces.length || !this.root.isConnected) return;
             this.field.refreshFonts();
             this.center.refit();
         }, () => undefined);
@@ -248,7 +316,7 @@ export class SkylineEngine {
         p.blurStrength = t.blurStrength;
         p.motionBlur = t.motionBlur;
         p.farDim = t.farDim;
-        tn.invalidate();
+        this.field.invalidate();
 
         this.sparks.params.rate = t.sparkRate;
 
@@ -272,11 +340,20 @@ export class SkylineEngine {
         const em = portrait
             ? Math.min(64, Math.max(22, Math.min(w * 0.065, h * 0.045))) * scale
             : Math.min(96, Math.max(24, Math.min(w * 0.032, h * 0.07))) * scale;
-        const ratio = portrait ? 0.88 : this.tuning.maxWidthRatio;
+        // 竖屏行宽占满大半个容器：先除开句内放大倍率，否则句末放大后行首尾会被裁掉
+        const ratio = portrait ? 0.88 / this.center.growTo : this.tuning.maxWidthRatio;
         this.root.style.setProperty('--sk-lyric-px', `${em.toFixed(2)}px`);
         this.center.maxWidthRatio = ratio;
-        // 主歌词句内会放大到 growTo，两侧要按放大后的宽度留空
-        this.field.setLayout({ w, h, em, centerY: h * 0.5, mainHalfW: ((w * ratio) / 2) * this.center.growTo, portrait });
-        requestAnimationFrame(() => this.center.refit()); // 等新字号生效再测量
+        // 主歌词句内会放大到 growTo：适宽要先除开它（竖屏与预览），两侧也要按放大后的宽度与安全边留空
+        this.field.setLayout({
+            w,
+            h,
+            em,
+            centerY: h * 0.5,
+            mainHalfW: ((w * ratio) / 2) * this.center.growTo,
+            edgeMargin: this.preview ? w * PREVIEW_EDGE_MARGIN : 0,
+            portrait,
+        });
+        this.afterFrame(() => this.center.refit()); // 等新字号生效再测量
     }
 }

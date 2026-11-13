@@ -52,6 +52,8 @@ interface Spark {
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const MAX = 400;
+/** 累计发射量最多欠这么多：掉帧、高频或高分贝时不要一口气补发历史粒子 */
+const MAX_CARRY = 32;
 
 export class Sparks {
     params: SparkParams = structuredClone(defaultSparkParams);
@@ -71,6 +73,13 @@ export class Sparks {
         this.buildSprites();
     }
 
+    /** 换歌 / 跳转：清掉尾迹、累计发射量和内部时间，不把旧歌的粒子带过来 */
+    reset(): void {
+        this.sparks.length = 0;
+        this.carry = 0;
+        this.time = 0;
+    }
+
     /**
      * @param head 演唱位置（CSS px），null 表示当前没有在唱
      * @param dt 本帧推进秒数，暂停时为 0
@@ -82,7 +91,12 @@ export class Sparks {
         if (head && dt > 0) {
             const { energy, beat, onset, strength } = this.pulse;
             const rateMul = 1 + (0.45 + 1.1 * energy - 1) * strength;
-            this.carry += p.rate * rateMul * dt + (onset ? 14 * beat * strength : 0);
+            // 粒子已满额就不再积欠：否则恢复播放或降帧后会突然补发一大簇
+            if (this.sparks.length < MAX) {
+                this.carry = Math.min(MAX_CARRY, this.carry + p.rate * rateMul * dt + (onset ? 14 * beat * strength : 0));
+            } else {
+                this.carry = 0;
+            }
             while (this.carry >= 1 && this.sparks.length < MAX) {
                 this.carry -= 1;
                 const em = head.em;

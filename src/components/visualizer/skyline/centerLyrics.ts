@@ -1,7 +1,7 @@
 import { splitLyricGraphemes } from '../../../utils/lyrics/graphemeTiming';
 import { cubicBezier } from './easing';
 import { TimedAnim } from './timedAnim';
-import { lineIndexAt, type SkyDoc as LyricDoc, type SkyWord as LyricWord } from './skylineLyrics';
+import { lineIndexAt, skyWordText, type SkyDoc as LyricDoc, type SkyWord as LyricWord } from './skylineLyrics';
 
 // src/components/visualizer/skyline/centerLyrics.ts
 // 中间主歌词（DOM）：换句过渡、句内放大、连续填色边缘、上浮、长音强调、间奏圆点。
@@ -98,21 +98,43 @@ export class CenterLyrics {
     private readonly dots: HTMLElement;
     private readonly dotEls: HTMLElement[];
     private lastDots = '';
+    // 释放用：观察器、挂起的下一帧回调、退休定时器、以及所有还活在页面上的行（含离场中的）
+    private readonly ro: ResizeObserver;
+    private readonly views = new Set<LineView>();
+    private readonly rafs = new Set<number>();
+    private readonly retireTimers = new Set<number>();
+    private disposed = false;
 
     constructor(private readonly host: HTMLElement) {
         this.dots = document.createElement('div');
         this.dots.className = 'sk-interlude';
         this.dotEls = [0, 1, 2].map(() => this.dots.appendChild(document.createElement('i')));
         host.append(this.dots);
-        new ResizeObserver(() => this.refit()).observe(host);
-        void document.fonts.ready.then(() => this.refit());
+        this.ro = new ResizeObserver(() => this.refit());
+        this.ro.observe(host);
+        void document.fonts.ready.then(() => {
+            if (!this.disposed) this.refit();
+        });
     }
 
     setDoc(doc: LyricDoc): void {
+        // 先取消并移除旧行（离场中的行也在这里停掉），再换引用：否则旧动画再也找不到
+        this.clearLines();
         this.doc = doc;
         this.idx = -2;
         this.cur = this.next = null;
+    }
+
+    /** 卸载：断开观察器、取消挂起回调与定时器、停掉所有行的动画 */
+    dispose(): void {
+        this.disposed = true;
+        this.ro.disconnect();
+        for (const id of this.rafs) cancelAnimationFrame(id);
+        this.rafs.clear();
+        for (const id of this.retireTimers) clearTimeout(id);
+        this.retireTimers.clear();
         this.clearLines();
+        this.cur = this.next = null;
     }
 
     /** 改了会影响 DOM 结构的参数（如长音强调开关）后调用 */
@@ -140,15 +162,20 @@ export class CenterLyrics {
     /**
      * 演唱位置（相对 host 的 CSS px）：x = 填色边缘，y = 文字顶部，em = 当前字号。
      * 没有在唱（句间空隙、标题、间奏）时返回 null。
+     *
+     * getBoundingClientRect 给的是含祖先缩放的屏幕距离（预览把整个舞台缩成小图），
+     * 而画布与布局用的是舞台局部 CSS px，所以要除掉 host 自己的缩放，否则粒子和 em 会被再缩一次。
      */
     head(): { x: number; y: number; em: number } | null {
         const v = this.cur;
         if (!v || !this.head_.active) return null;
         const r = v.inner.getBoundingClientRect();
         const h = this.host.getBoundingClientRect();
-        const scale = v.inner.offsetWidth ? r.width / v.inner.offsetWidth : 1;
-        const em = r.height / 1.2;
-        return { x: r.left - h.left + this.head_.x * scale, y: r.top - h.top + (r.height - em) / 2 + em * 0.12, em };
+        const hostScale = this.host.offsetWidth > 0 ? h.width / this.host.offsetWidth : 1;
+        const local = hostScale > 0 ? 1 / hostScale : 1;
+        const scale = v.inner.offsetWidth ? r.width / v.inner.offsetWidth : 1; // 行自身的适宽 + 句内放大（含祖先缩放）
+        const em = (r.height / 1.2) * local;
+        return { x: (r.left - h.left + this.head_.x * scale) * local, y: (r.top - h.top) * local + (r.height * local - em) / 2 + em * 0.12, em };
     }
 
     // ---- 状态切换 ----
@@ -158,6 +185,9 @@ export class CenterLyrics {
         if (this.next && this.next.idx === idx) {
             this.cur = this.next;
             this.setState(this.cur, 'current');
+            // 预览句比当前句轻一档字重：提升为当前句后字宽变了，旧测量作废，重新适宽 + 测量（每次换句一次）
+            this.fit(this.cur.el);
+            this.measure(this.cur);
         } else {
             this.cur = this.make(idx, 'current');
         }
@@ -176,14 +206,20 @@ export class CenterLyrics {
         this.cur = this.make(idx, 'current');
         this.next = this.make(idx + 1, 'next');
         this.host.getBoundingClientRect(); // 强制回流，让 no-anim 先生效
-        requestAnimationFrame(() => this.host.classList.remove('sk-no-anim'));
+        this.afterFrame(() => this.host.classList.remove('sk-no-anim'));
     }
 
     private retire(view: LineView): void {
         view.growAnim?.freeze(); // 离场时保持最后的大小
         this.setState(view, 'past');
         view.el.classList.remove('sk-title');
-        setTimeout(() => view.el.remove(), this.retireMs);
+        const id = window.setTimeout(() => {
+            this.retireTimers.delete(id);
+            view.growAnim?.cancel(); // 离场完成：动画不再需要，别让合成器继续跑
+            view.el.remove();
+            this.views.delete(view);
+        }, this.retireMs);
+        this.retireTimers.add(id);
     }
 
     private setState(view: LineView, state: State): void {
@@ -191,8 +227,18 @@ export class CenterLyrics {
     }
 
     private clearLines(): void {
-        for (const v of [this.cur, this.next]) v?.growAnim?.cancel();
+        for (const v of this.views) v.growAnim?.cancel();
         for (const el of [...this.host.querySelectorAll('.sk-line')]) el.remove();
+        this.views.clear();
+    }
+
+    /** 下一帧执行一件事；卸载时取消，避免回调打到已经拆掉的 DOM 上 */
+    private afterFrame(fn: () => void): void {
+        const id = window.requestAnimationFrame(() => {
+            this.rafs.delete(id);
+            if (!this.disposed) fn();
+        });
+        this.rafs.add(id);
     }
 
     // ---- DOM ----
@@ -226,18 +272,20 @@ export class CenterLyrics {
                 const emph = this.emphasize ? emphasisFor(w, i === lastIdx) : null;
                 const units: Unit[] = [];
                 if (emph) {
-                    for (const ch of splitLyricGraphemes(w.text)) {
+                    const chars = splitLyricGraphemes(w.text);
+                    chars.forEach((ch, ci) => {
                         const c = document.createElement('span');
                         c.className = 'sk-c sk-u';
-                        c.textContent = ch;
+                        // 附在词首 / 词尾的标点跟着那个字一起填色
+                        c.textContent = (ci === 0 ? w.prefix ?? '' : '') + ch + (ci === chars.length - 1 ? w.suffix ?? '' : '');
                         span.append(c);
                         emph.chars.push(c);
                         units.push({ el: c, left: 0, width: 0, last: NaN });
-                    }
+                    });
                     emph.last = emph.chars.map(() => '');
                 } else {
                     span.classList.add('sk-u');
-                    span.textContent = w.text;
+                    span.textContent = skyWordText(w);
                     units.push({ el: span, left: 0, width: 0, last: NaN });
                 }
                 inner.append(span);
@@ -248,6 +296,7 @@ export class CenterLyrics {
 
         this.host.append(el);
         const view: LineView = { idx, el, inner, words, feather: 0, growAnim: null };
+        this.views.add(view);
         this.fit(el);
         this.measure(view);
         return view;

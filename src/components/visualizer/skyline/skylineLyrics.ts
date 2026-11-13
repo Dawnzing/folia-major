@@ -12,7 +12,14 @@ export interface SkyWord {
     end: number;
     /** 该词后面是否跟一个空格（渲染为独立文本节点，不参与填色） */
     space: boolean;
+    /** fullText 里有、但不属于任何计时词且在最前的前导字符（标点等）：附在第一个词前面，跟着它填色 */
+    prefix?: string;
+    /** 同上，夹在词之后（含末词之后）的字符：附在前一个词后面，跟着它填色 */
+    suffix?: string;
 }
+
+/** 一个词在画面上显示的文本：前导标点 + 计时词 + 尾随标点（空格另算，见 space） */
+export const skyWordText = (w: SkyWord): string => `${w.prefix ?? ''}${w.text}${w.suffix ?? ''}`;
 
 export interface SkyLine {
     start: number;
@@ -30,16 +37,29 @@ export interface SkyDoc {
 }
 
 /**
- * 有的来源把空格只留在整句文本里，逐词数据里没有（「知らない わかんないよ」）：
- * 按顺序把每个词对到整句文本上，两个词之间隔着空白就补上空格标记。对不上时保持原样。
+ * 按顺序把每个词对到整句文本上，让展示文本与 fullText 一致：
+ * - 有的来源把空格只留在整句文本里，逐词数据里没有（「知らない わかんないよ」）→ 两词之间隔着空白就补上空格标记；
+ * - 有的来源把标点只留在整句文本里（fullText「Hello, world!」→ 词「Hello」「world」）→
+ *   夹在词之间、不属于任何词的字符附到前一个词后面，首词之前的附到第一个词前面，跟着那个词一起填色。
+ * 有一个词对不上时整体放弃，保持原样（此时不能相信位置关系）。
  */
-function restoreSpaces(words: SkyWord[], fullText: string): void {
+function alignToFullText(words: SkyWord[], fullText: string): void {
+    const starts: number[] = [];
     let cursor = 0;
-    for (let i = 0; i < words.length; i++) {
-        const at = fullText.indexOf(words[i].text, cursor);
+    for (const w of words) {
+        const at = fullText.indexOf(w.text, cursor);
         if (at < 0) return;
-        if (i > 0 && /\s/.test(fullText.slice(cursor, at))) words[i - 1].space = true;
-        cursor = at + words[i].text.length;
+        starts.push(at);
+        cursor = at + w.text.length;
+    }
+    const lead = fullText.slice(0, starts[0]).replace(/\s+/g, '');
+    if (lead) words[0].prefix = lead;
+    for (let i = 0; i < words.length; i++) {
+        const gap = fullText.slice(starts[i] + words[i].text.length, i + 1 < words.length ? starts[i + 1] : fullText.length);
+        const extra = gap.replace(/\s+/g, '');
+        if (extra) words[i].suffix = extra;
+        // 空白折叠成一个空格标记（多个空格、制表符都算一个）
+        if (i + 1 < words.length) words[i].space = /\s/.test(gap);
     }
 }
 
@@ -90,7 +110,7 @@ export function fromFoliaLines(lines: Line[]): SkyLine[] {
             words.push({ text: line.fullText.trim(), start: line.startTime, end: line.endTime, space: false });
         }
         if (!words.length) continue; // 空行（间奏标记）不显示
-        restoreSpaces(words, line.fullText);
+        alignToFullText(words, line.fullText);
         words[words.length - 1].space = false;
         out.push({
             start: words[0].start,

@@ -14,6 +14,8 @@ export interface Sprite {
     canvas: HTMLCanvasElement;
     /** 转换完成后优先用它绘制 */
     bitmap?: ImageBitmap;
+    /** 已失效（被清空或 LRU 淘汰）：迟到的 ImageBitmap 要直接 close，不要再挂回来 */
+    dead?: boolean;
     /** 文字左边缘在贴图中的 x（px），即模糊留白 */
     padX: number;
     /** 文字竖直中心在贴图中的 y（px） */
@@ -61,7 +63,13 @@ export class SpriteCache {
     }
 
     clear(): void {
-        for (const levels of this.map.values()) for (const s of levels) s?.bitmap?.close();
+        for (const levels of this.map.values()) {
+            for (const s of levels) {
+                if (!s) continue;
+                s.dead = true;
+                s.bitmap?.close();
+            }
+        }
         this.map.clear();
         this.applyFont(this.measureCtx, REF_SIZE, ''); // 字体加载完成后重新测量
     }
@@ -104,7 +112,11 @@ export class SpriteCache {
         if (this.map.size > this.limit) {
             const oldest = this.map.keys().next();
             if (!oldest.done) {
-                for (const s of this.map.get(oldest.value) ?? []) s?.bitmap?.close();
+                for (const s of this.map.get(oldest.value) ?? []) {
+                    if (!s) continue;
+                    s.dead = true;
+                    s.bitmap?.close();
+                }
                 this.map.delete(oldest.value);
             }
         }
@@ -138,7 +150,14 @@ export class SpriteCache {
         const sprite: Sprite = { canvas, padX: pad, midY, ref };
         if (typeof createImageBitmap === 'function') {
             createImageBitmap(canvas)
-                .then((bmp) => (sprite.bitmap = bmp))
+                .then((bmp) => {
+                    // 生成期间可能已被 clear 或 LRU 淘汰：那时再没人会 close 它，现在自己关掉
+                    if (sprite.dead) {
+                        bmp.close();
+                        return;
+                    }
+                    sprite.bitmap = bmp;
+                })
                 .catch(() => {});
         }
         return sprite;

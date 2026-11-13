@@ -33,7 +33,8 @@
     inset: 0;
     overflow: hidden;
     pointer-events: none;
-    background:
+    /* 两层渐变用 background-image：用 background 简写会把上面声明的黑底重置成透明 */
+    background-image:
         radial-gradient(
             55% 45% at 50% 50%,
             color-mix(in srgb, var(--sk-sung) calc(var(--sk-glow) * 100%), transparent),

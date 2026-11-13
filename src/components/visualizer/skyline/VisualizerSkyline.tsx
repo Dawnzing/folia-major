@@ -1,7 +1,13 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { resolveThemeFontStack, resolveThemeFontWeight } from '../../../utils/fontStacks';
+import { getLineRenderEndTime } from '../../../utils/lyrics/renderHints';
+import { DEFAULT_SUBTITLE_OVERLAY_LAYOUT, withSubtitleOverlayUpcomingPreview } from '../../../utils/lyrics/subtitleOverlayLayout';
 import type { VisualizerSharedProps } from '../definition';
+import { useLyricRenderQuality } from '../renderQuality/useLyricRenderQuality';
+import { useVisualizerRuntime } from '../runtime';
 import VisualizerShell from '../VisualizerShell';
+import VisualizerSubtitleOverlay from '../VisualizerSubtitleOverlay';
+import { resolveSubtitleFontSizes } from '../subtitleFontSizes';
 import { SkylineEngine } from './skylineEngine';
 import { fromFoliaLines } from './skylineLyrics';
 import skylineTuning from './tuning';
@@ -11,16 +17,32 @@ import { SKYLINE_FONT_STACK, SKYLINE_FONT_STACK_JA } from './types';
 // 天际的 React 外壳：把不依赖 React 的 SkylineEngine 挂进共享外壳，用自己的 RAF 循环读 currentTime 驱动它。
 // React 只负责挂载和离散输入（歌词、主题、字体、tuning），逐帧的时间和音频能量不进 state。
 
+/**
+ * 音频能量统一到 0～1：主播放器 / OBS 给的是 0～255（audioPower、audioBands.bass），
+ * 预览时钟和引擎内部按 0～1 计算（与 sonnetShotMg.ts 同一写法）。
+ */
+const normalizeAudioLevel = (value: number) => Math.min(1, Math.max(0, value > 1 ? value / 255 : value));
+
 const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
     currentTime,
+    currentLineIndex,
     lines,
     theme,
+    subtitleTheme,
     audioPower,
     audioBands,
     paused = false,
     showText = true,
     isDaylight = false,
     lyricsFontScale = 1,
+    subtitleFontScale = 1,
+    subtitleOverlayOpacity,
+    subtitleOverlayBackground,
+    subtitleUpcomingLyricsBlur,
+    isPlayerChromeHidden = false,
+    hideTranslationSubtitle = false,
+    subtitleOverlayLayout,
+    isPreviewMode = false,
     songTitle,
     songArtist,
     visualizerTunings,
@@ -38,14 +60,33 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
     // 用户的歌词字号倍率乘在样式自己的字号倍率上
     const effectiveTuning = useMemo(() => ({ ...tuning, lyricScale: tuning.lyricScale * lyricsFontScale }), [tuning, lyricsFontScale]);
     const skyLines = useMemo(() => fromFoliaLines(lines), [lines]);
+    // 词云画布的全局分辨率挡位（天际没有自己的一份覆盖）。预览格子用原始密度，不额外超采样
+    const renderQuality = useLyricRenderQuality();
+    const renderScale = isPreviewMode ? 1 : renderQuality.scale;
+
+    // 底部字幕（译文 / 下一句）与其他样式共用同一套运行时与字号
+    const { activeLine, recentCompletedLine, nextLines } = useVisualizerRuntime({
+        currentTime,
+        currentLineIndex,
+        lines,
+        getLineEndTime: getLineRenderEndTime,
+    });
+    const { translationFontSize, upcomingFontSize } = resolveSubtitleFontSizes(lyricsFontScale);
+    // 天际自己在主歌词下方就预告下一句：字幕行在这一句上没东西可显示（没有译文）时，不再用后面几句顶替，
+    // 否则下一句会出现两遍。用户在布局里明确选的行（含「下一句」）照常显示
+    const subtitleLayout = withSubtitleOverlayUpcomingPreview(subtitleOverlayLayout ?? DEFAULT_SUBTITLE_OVERLAY_LAYOUT, false);
 
     // 逐帧循环读的输入放在 ref 里：MotionValue 换了对象（换歌交接）也不用重建引擎
-    const live = useRef({ currentTime, audioPower, audioBands, paused });
+    const live = useRef({ currentTime, audioPower, audioBands, paused, showText });
     // 挂载时要用的离散输入的最新值
-    const initial = useRef({ effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme });
+    const initial = useRef({
+        effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme, preview: isPreviewMode, renderScale,
+    });
     useLayoutEffect(() => {
-        live.current = { currentTime, audioPower, audioBands, paused };
-        initial.current = { effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme };
+        live.current = { currentTime, audioPower, audioBands, paused, showText };
+        initial.current = {
+            effectiveTuning, fontStack, fontStackJa, fontWeight, skyLines, songTitle, songArtist, theme, preview: isPreviewMode, renderScale,
+        };
     });
 
     // 挂载引擎与逐帧循环：只挂一次，之后的变化由下面几个 effect 送进去
@@ -53,7 +94,10 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
         const host = hostRef.current;
         if (!host) return;
         const init = initial.current;
-        const engine = new SkylineEngine(host, init.effectiveTuning, init.fontStack, init.fontWeight, init.fontStackJa);
+        const engine = new SkylineEngine(host, init.effectiveTuning, init.fontStack, init.fontWeight, init.fontStackJa, {
+            preview: init.preview,
+            renderScale: init.renderScale,
+        });
         engine.setThemeColors(init.theme.accentColor, init.theme.primaryColor, true);
         engine.setLines(init.skyLines, init.songTitle, init.songArtist);
         engineRef.current = engine;
@@ -63,10 +107,13 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
             const dt = (now - last) / 1000;
             last = now;
             const v = live.current;
-            engine.frame(v.currentTime.get(), dt, !v.paused, {
-                energy: v.audioPower.get(),
-                bass: v.audioBands.bass.get(),
-            });
+            // 宿主隐藏歌词时整个 frame 跳过（不更新、不画）；恢复时由下面的 effect 补画一帧
+            if (v.showText) {
+                engine.frame(v.currentTime.get(), dt, !v.paused, {
+                    energy: normalizeAudioLevel(v.audioPower.get()),
+                    bass: normalizeAudioLevel(v.audioBands.bass.get()),
+                });
+            }
             raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
@@ -94,6 +141,15 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
         engineRef.current?.setTuning(effectiveTuning);
     }, [effectiveTuning]);
 
+    useEffect(() => {
+        engineRef.current?.setRenderScale(renderScale);
+    }, [renderScale]);
+
+    useEffect(() => {
+        // 从隐藏恢复：立即按当前时间补画一帧（隐藏期间引擎没跑）
+        if (showText) engineRef.current?.invalidate();
+    }, [showText]);
+
     return (
         <VisualizerShell
             theme={theme}
@@ -107,6 +163,23 @@ const VisualizerSkyline: React.FC<VisualizerSharedProps> = ({
                 ref={hostRef}
                 className="absolute inset-0 pointer-events-none"
                 style={{ opacity: showText ? 1 : 0 }}
+            />
+            <VisualizerSubtitleOverlay
+                showText={showText}
+                activeLine={activeLine}
+                recentCompletedLine={recentCompletedLine}
+                nextLines={nextLines}
+                theme={theme}
+                subtitleTheme={subtitleTheme}
+                translationFontSize={translationFontSize}
+                upcomingFontSize={upcomingFontSize}
+                subtitleOverlayOpacity={subtitleOverlayOpacity}
+                subtitleOverlayBackground={subtitleOverlayBackground}
+                subtitleUpcomingLyricsBlur={subtitleUpcomingLyricsBlur}
+                subtitleFontScale={subtitleFontScale}
+                isPlayerChromeHidden={isPlayerChromeHidden}
+                hideTranslationSubtitle={hideTranslationSubtitle}
+                subtitleOverlayLayout={subtitleLayout}
             />
         </VisualizerShell>
     );
